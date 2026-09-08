@@ -243,7 +243,7 @@ The `method` key selects FedACM (the default) or one of the compared methods of 
 code path, which makes the FedACM components verifiable, but the repository does not automate
 the experimental campaign of the paper: it contains no sweep, ablation, scalability,
 statistical-analysis, figure-generation or log-parsing tooling, and no experimental outputs.
-
+<!-- 
 ## Citation
 
 ```bibtex
@@ -256,7 +256,7 @@ statistical-analysis, figure-generation or log-parsing tooling, and no experimen
   year    = {2026}
 }
 ```
-
+-->
 ## License
 
 MIT. See [`LICENSE`](LICENSE).
