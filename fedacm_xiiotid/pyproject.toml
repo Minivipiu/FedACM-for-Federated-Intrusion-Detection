@@ -1,0 +1,188 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "fedacm-xiiotid"
+version = "1.0.0"
+description = "FedACM: Attack Concept Memory for class-incremental intrusion detection -- X-IIoTID"
+license = "MIT"
+requires-python = ">=3.10"
+dependencies = [
+    "flwr[simulation]==1.19.0",
+    "numpy>=1.26.0",
+    "pandas>=2.0.0",
+    "scikit-learn>=1.4.0",
+    "torch>=2.0.0",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["fedacm_ids"]
+
+[tool.flwr.app]
+publisher = "minivipiu"
+
+[tool.flwr.app.components]
+serverapp = "fedacm_ids.server_app:app"
+clientapp = "fedacm_ids.client_app:app"
+
+# ---------------------------------------------------------------------------
+# Run configuration.
+#
+# Every key below can be overridden from the command line without editing this
+# file, e.g.
+#     flwr run . --run-config "method='fedavg' seed=7"
+# Flower rejects any --run-config key that is not declared here, so a new knob
+# must be added to this table before it can be overridden.
+#
+# The values below are the ones that produced the reported results for
+# X-IIoTID (manuscript Tables 3 and 5).
+# ---------------------------------------------------------------------------
+[tool.flwr.app.config]
+
+# --- Dataset -----------------------------------------------------------------
+# EDIT THIS PATH. The datasets are public but not redistributed here; see the
+# repository README for the download links and the expected file format.
+dataset-path = "/absolute/path/to/X-IIoTID_dataset.csv"
+
+# Class-to-stage assignment of the five-stage class-incremental protocol
+# (manuscript Table 4). Stages are separated by ";", classes within a stage by
+# ",". Kept fixed across every method so that all of them see the same
+# incremental exposure sequence.
+#   S1 classes 4,5 | S2 classes 6,1 | S3 classes 3,8 | S4 classes 0,2 | S5 classes 7,9
+class-stages = "4,5;6,1;3,8;0,2;7,9"
+
+# Held-out test partition: stratified 20% of the whole dataset (manuscript
+# Section 4.2). Fitted transformations never see it.
+test-fraction = 0.2
+
+# --- Train / validation / test protocol (manuscript Section 4.6) -------------
+# Model selection used a 64/16/20 split: `validation-fraction = 0.16` carves a
+# stratified validation subset out of the 80% training partition (never out of
+# the test partition) and `evaluation-split = "validation"` scores the run on
+# it. Once the configuration was frozen, the full 80% training partition was
+# restored and the test partition was used exactly once, which is the default
+# below and the path that produced every reported number.
+#
+#   Search:  flwr run . --run-config "validation-fraction=0.16 evaluation-split='validation' raca-gamma=0.10"
+#   Final :  flwr run . --run-config "method='fedacm'"
+validation-fraction = 0.0
+evaluation-split = "test"
+
+# --- Reproducibility ---------------------------------------------------------
+# The reported results average 15 independent runs over 15 distinct random
+# seeds (manuscript Section 4.6). Any integer can be selected without editing
+# this file, with `--run-config "seed=<n>"`. The seed controls the train/test
+# split, the Dirichlet partition, the client exposure sequence and the torch /
+# numpy / random state, so a given seed reproduces the same data realization
+# for every method, which is what makes the runs paired.
+seed = 42
+
+# --- Backbone (manuscript Section 4.6, shared by every method and dataset) ----
+# MLP encoder 128 -> 64 -> `embedding-dim`, plus a linear auxiliary head.
+embedding-dim = 32
+local-epochs = 3
+batch-size = 64
+learning-rate = 0.001
+
+# --- Method selector ---------------------------------------------------------
+# Supported: fedacm, fedproto, fedavg, fedprox, lwf, ewc, local-finetuning.
+# The seven share the backbone, the data pipeline, the client partitions and the
+# incremental exposure sequence; they differ only in their federated/continual
+# mechanisms (see fedacm_ids/config.py).
+method = "fedacm"
+
+# --- Method presets, only for ablations or sensitivity analysis ---------------
+# "auto" resolves to the value implied by `method`. Overriding one of these
+# decouples a single mechanism from its method preset.
+# memory-aggregation: none | simple | raca      (FedProto -> simple, FedACM -> raca)
+memory-aggregation = "auto"
+# inference-mode: softmax | prototype           (FedACM/FedProto -> prototype, Eq. 11)
+inference-mode = "auto"
+# model-aggregation: num-examples | client-reliability
+#   `client-reliability` is the FedWLA-style ablation reported in the manuscript.
+model-aggregation = "auto"
+# kd-scope: none | old | known | memory         (LwF -> old, FedACM -> memory)
+kd-scope = "auto"
+
+# --- Incremental protocol (manuscript Section 4.3) ---------------------------
+# exposure-mode: dynamic-recurrent | disjoint | cumulative.
+#   dynamic-recurrent is the protocol of the paper: each client sees the classes
+#   introduced at the current stage plus previously seen classes that reappear
+#   independently with probability `recurrent-class-prob`.
+exposure-mode = "dynamic-recurrent"
+num-stages = 5
+# 2 rounds x 5 stages = 10 communication rounds. The communication-budget study
+# of Section 5.5 additionally uses 5 and 10.
+rounds-per-stage = 2
+recurrent-class-prob = 0.35
+# Dirichlet concentration for the class-wise non-IID partition (Eq. 12). The
+# heterogeneity study of Section 5.5 additionally uses 0.05, 0.1, 0.7 and 1.0.
+partition-alpha = 0.3
+# Federation size. Must match `options.num-supernodes` below; the scalability
+# study of Section 5.3 additionally uses 20, 50, 100 and 200.
+min-available-clients = 10
+
+# --- Local objective, Eq. (2) -------------------------------------------------
+# Some of these are ignored depending on `method` and on the ablation flags.
+# Fixed across datasets: lambda-proto, lambda-margin, lambda-kd, kd-temperature,
+# prototype-margin (manuscript Section 4.6, "Fixed FedACM parameters").
+fedprox-mu = 0.01            # mu_prox, dataset-specific (Table 5)
+lambda-proto = 0.25         # lambda_P,  Eq. (3a)
+lambda-margin = 0.05        # lambda_M,  Eq. (3b)
+lambda-kd = 0.05            # lambda_KD, temperature-scaled KL on memory classes
+kd-temperature = 2.0        # T_d
+prototype-margin = 1.0      # m,         Eq. (3b)
+# EWC baseline only.
+ewc-lambda = 0.01
+ewc-max-batches = 8
+
+# --- Reliability-Aware Concept Aggregation, Eq. (5) ---------------------------
+# rho = n^alpha_r * (1-u)^beta_r / (eps+sigma)^gamma_r * exp(-delta_r*||p-mu||)
+# alpha_r, epsilon, eta and tau are fixed across datasets; beta_r, gamma_r and
+# delta_r are the dataset-specific exponents of manuscript Table 5, selected on
+# the validation subset over
+#   beta_r  in {0, 0.25, 0.50, 1.00}
+#   gamma_r in {0, 0.05, 0.10, 0.25, 0.50, 1.00}
+#   delta_r in {0, 0.02, 0.05, 0.10}
+raca-alpha = 1.0            # alpha_r, support exponent
+raca-beta = 1.0             # beta_r,  confidence exponent      (dataset-specific)
+raca-gamma = 1.0            # gamma_r, compactness exponent     (dataset-specific)
+raca-delta = 0.1            # delta_r, temporal-consistency rate (dataset-specific)
+raca-epsilon = 0.000001     # epsilon, numerical stability only
+memory-eta = 0.65           # eta,     memory smoothing rate, Eq. (7)
+drift-tau = 1.0             # tau,     drift-compensation bandwidth, Eq. (9a)
+
+# --- FedACM ablations (manuscript Table 10) ----------------------------------
+# Set one or more to true from --run-config, e.g.
+#     flwr run . --run-config "method='fedacm' ablate-raca=true"
+ablate-raca = false                  # RACA -> support-weighted averaging
+ablate-memory = false                # no Attack Concept Memory (also forces softmax inference)
+ablate-prototype-inference = false   # FedACM training, softmax inference instead of Eq. (11)
+ablate-kd = false                    # drop lambda_KD from Eq. (2)
+ablate-proto = false                 # drop lambda_P  from Eq. (2)
+ablate-margin = false                # drop lambda_M  from Eq. (2)
+ablate-fedprox = false               # drop mu_prox   from Eq. (2)
+ablate-drift = false                 # no drift compensation, Eqs. (8)-(10)
+# Individual RACA reliability factors (manuscript Table 11, upper block).
+ablate-uncertainty = false           # remove (1-u)^beta_r  from Eq. (5)
+ablate-dispersion = false            # remove (eps+sigma)^gamma_r from Eq. (5)
+ablate-temporal = false              # remove exp(-delta_r*||.||) from Eq. (5)
+# Structural ablations.
+ablate-model-aggregation = false     # keep the local model, do not aggregate parameters
+ablate-ewc = false                   # EWC baseline only
+
+# --- Runtime caps for quick smoke tests, NOT paper hyperparameters ------------
+# 0 = use the full local partition, which is what the reported runs use
+# ("Each client uses its full locally available partition without an additional
+# sampling cap", manuscript Section 4.3).
+max-train-samples-per-client = 0
+max-test-samples-per-client = 0
+
+[tool.flwr.federations]
+default = "local-simulation"
+
+[tool.flwr.federations.local-simulation]
+# Must match `min-available-clients` above. Override without editing this file:
+#     flwr run . --federation-config "options.num-supernodes=50"
+options.num-supernodes = 10
