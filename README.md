@@ -1,4 +1,4 @@
-# FedACM: Attack Concept Memory for Class-Incremental Intrusion Detection in IoT/IIoT Environments
+# FedACM: Attack Concept Memory for Consistent Class-Incremental Intrusion Detection across Heterogeneous Edge IoT/IIoT Environments
 
 Public implementation of **FedACM**, a federated class-incremental intrusion-detection method
 built around a compact server-side **Attack Concept Memory**.
